@@ -1,6 +1,7 @@
 library(tidyverse)
 library(ggplot2)
 
+source("step10.helper.funcs.R")
 
 
 allRecords<-readxl::read_excel("data/summary-table-Sept-7-2022.xlsx", sheet = "pkchen")
@@ -21,7 +22,28 @@ perbone[["DaysSurgToCutoff"]]<-difftime("2022-08-01", substr(perbone$surgeryDate
 setdiff(perbone$NewName, as.matrix(patientInfo)[,2])
 #as.matrix(patientInfo)[,6][match(perbone$NewName, as.matrix(patientInfo)[,2])]
 
+HEAL.perbone<-HEALING(perbone)
+perbone[["notHealingGroups"]]<-HEAL.perbone$notHealingGroups
+perbone[["HealingGroups"]]<-HEAL.perbone$HealingGroups
+perbone[["HEAL"]]<-HEAL.perbone$GROUPS
+table(perbone[["HEAL"]], perbone$HealingGroups)
+table(perbone[["HEAL"]], perbone$notHealingGroups)
 
+detach(HEAL.perbone)
+
+attach(HEAL.perbone)
+
+MatMinRUST[which(apply(apply(MatMinRUST, 1, diff), 2, min, na.rm=T)<= -2), ]
+perbone[which(apply(apply(MatMinRUST, 1, diff), 2, min, na.rm=T)<= -2), ]
+
+
+vecMin<-jitter(as.vector(t(MatMinRUST)))
+vecDaysPostOp<-as.vector(t(matSurgDays))
+vecID<-rep(1:nrow(perbone), rep(11, nrow(perbone)))
+datRUST<-data.frame(vecMin, vecDaysPostOp, vecID)[!is.na(vecMin), ]
+ggplot(datRUST, aes(x=vecDaysPostOp, y=vecMin, group=vecID)) +
+	geom_point() +
+	geom_line(aes(group=vecID))
 ####################################################
 
 perbone[["nameBoneOrder"]]<-paste0(perbone$NewName, "-", perbone$boneOrder)
@@ -30,6 +52,7 @@ perbone[["nameLinkTo"]]<-paste0(perbone$NewName, "-", perbone$linkTo)
 length(table(perbone[["nameBoneOrder"]]))
 tail(sort(table(perbone[["nameBoneOrder"]])))
 
+table(perbone$whichBone[match(perbone$nameLinkTo, perbone$nameBoneOrder)], perbone$whichBone)
 
 findID<-function(vecID, vecLinks, linki){
 	if(is.na(linki)){return("compound")}
@@ -76,6 +99,7 @@ perboneRevisons<-perboneLimbsSZH[which(!perboneLimbsSZH$linkTo %in% c(0, -2)), ]
 
 perboneIndexOsteo<-perboneIndexSurg[perboneIndexSurg$surgType=="osteotomy", ]
 perboneIndexOsteo[["revised"]]<-perboneIndexOsteo$nameBoneOrder %in% perboneRevisons$nameLinkTo
+perboneRevisonsOfIndex<-perboneRevisons[perboneRevisons$nameLinkTo %in% perboneIndexOsteo$nameBoneOrder, ]
 
 #perboneLimbsSZH[["nameBoneOrder"]]<-paste0(perboneLimbsSZH$NewName, "-", perboneLimbsSZH$boneOrder)
 #perboneLimbsSZH[["nameLinkTo"]]<-paste0(perboneLimbsSZH$NewName, "-", perboneLimbsSZH$linkTo)
@@ -99,6 +123,13 @@ table(perboneIndexOsteo$surgReasons, perboneIndexOsteo$whichBone)
 
 table(perboneIndexOsteo$surgGroups, !is.na(perboneIndexOsteo[["FU1-RUST"]]))
 
+table(perboneIndexOsteo$HEAL, perboneIndexOsteo$surgGroups)
+table(perboneIndexOsteo$HEAL, perboneIndexOsteo$HealingGroups)
+table(perboneIndexOsteo$HEAL, perboneIndexOsteo$notHealingGroups)
+
+table(perboneIndexOsteo$HEAL,  ceiling(perboneIndexOsteo$DaysSurgToCutoff/365))
+table(perboneRevisonsOfIndex$HEAL,  ceiling(perboneRevisonsOfIndex$DaysSurgToCutoff/365))
+
 ####################################################
 TABULATE<-function(var1="surgReasons", var2="linkTo"){
 	tab1<-table(perboneLimbsSZH[[var1]], perboneLimbsSZH[[var2]])
@@ -112,96 +143,86 @@ tab4<-TABULATE(var2="surgType")
 tab5<-TABULATE(var2="numSites")
 ####################################################
 ####################################################
-source("step10.helper.funcs.R")
 #perboneLimbsSZH<-perbone
-perboneRevisonsOfIndex<-perboneRevisons[perboneRevisons$nameLinkTo %in% perboneIndexOsteo$nameBoneOrder, ]
+
+HEAL.perboneIndexOsteo<-HEALING(perboneIndexOsteo)
+HEAL.perboneRevisonsOfIndex<-HEALING(perboneRevisonsOfIndex)
+
+table(perboneIndexOsteo$notHealingGroups, perboneIndexOsteo$HealingGroups)
+table(perboneRevisonsOfIndex$notHealingGroups, perboneRevisonsOfIndex$HealingGroups)
+
+detach(HEAL.perboneIndexOsteo)
+detach(HEAL.perbone)
+detach(HEAL.perboneRevisonsOfIndex)
+
+attach(HEAL.perboneIndexOsteo)
 OBJ1<-perboneIndexOsteo
-OBJ1<-perbone
+
+
+attach(HEAL.perboneRevisonsOfIndex)
 OBJ1<-perboneRevisonsOfIndex
 
-FUdate<-OBJ1[, grepl("FU.*-Date", colnames(OBJ1))]
+surgAges<-as.integer(difftime(substr(OBJ1$surgeryDate, 1, 10), OBJ1$DOB, unit="days")/365)
+surgAges[surgAges>25.5] <-25.5
+ageGrp<-c("0-5yrs", "5-10yrs", "10-15yrs", "15-20yrs", "20-25yrs", ">25yrs")[ceiling(surgAges/5)]
 
-matSurgDays<-sapply(1:ncol(FUdate), function(i){
-		as.integer(difftime(as.Date(FUdate[[i]]), as.Date(OBJ1$surgeryDate),unit="days"))
-	})
-inddaysNonPos<-which(apply(matSurgDays, 1, function(x)sum(diff(x)<=0, na.rm=T))>0)
-matSurgDays[inddaysNonPos, ]
+table(OBJ1$HEAL, ageGrp)
+table(OBJ1$HEAL, OBJ1$NailType)
+table(OBJ1$HEAL, OBJ1$whichBone)
+table(OBJ1$HEAL, OBJ1$surgReasons)
 
-lastFUday<-apply(matSurgDays[,-1], 1, max, na.rm=T)
-FUrust<-OBJ1[, grepl("FU.*-RUST", colnames(OBJ1))]
-FUrust2<-apply(as.matrix(FUrust), 2, function(x)gsub("\\(.*$", "", x))
+OBJ1[["ageGrp"]]<-ageGrp
 
-sort(table(FUrust2))
-table(unlist(strsplit(unique(as.vector(FUrust2)), ";")))
 
-MatMinRUST<-apply(FUrust2, 2, function(x){
-	Ltmp<-sapply(strsplit(x, ";"), as.numeric)
-	sapply(Ltmp, min)
-})
-MatMinRUSTprox<-apply(FUrust2, 2, function(x){
-	Ltmp<-sapply(strsplit(x, ";"), as.numeric)
-	sapply(Ltmp, function(x)x[1])
-})
-MatMinRUSTmid<-t(apply(FUrust2, 1, function(x){
-	Ltmp<-sapply(strsplit(x, ";"), as.numeric)
-	if(sapply(Ltmp, length)[1]<3){
-		return(rep(NA,11))
-	}else{
-		return(sapply(Ltmp, function(x){
-			mean(x[-c(1, length(x))], na.rm=T)
-		}))
-	}
-}))
-MatMinRUSTdist<-apply(FUrust2, 2, function(x){
-	Ltmp<-sapply(strsplit(x, ";"), as.numeric)
-	sapply(Ltmp, function(x)x[length(x)])
-})
+set.seed(0)
+vecMin<-jitter(as.vector(t(MatMinRUST)))
+vecDaysPostOp<-jitter(as.vector(t(matSurgDays)))
+vecID<-rep(1:nrow(OBJ1), rep(11, nrow(OBJ1)))
+vecName<-rep(OBJ1$NewName, rep(11, nrow(OBJ1)))
+vecHEAL<-rep(OBJ1$HEAL, rep(11, nrow(OBJ1)))
 
-daysFirst10<-sapply(1:nrow(MatMinRUST), function(i){
-	x<-MatMinRUST[i, ]
-	ind10<-which(x>=10)[1]
-	matSurgDays[i, ind10]
-})
-daysLast9<-sapply(1:nrow(MatMinRUST), function(i){
-	x<-MatMinRUST[i, ]
-	ind10<-which(x>=10)[1]
-	ind9<-max(which(x<10))
-	indnothealed<-min(c(ind10-1, ind9), na.rm=T)
-	matSurgDays[i, indnothealed]
-})
+datRUST<-data.frame(vecMin, vecDaysPostOp, vecID, vecName, vecHEAL)[!is.na(vecMin), ]
+ggplot(datRUST, aes(x=vecDaysPostOp, y=vecMin, group=vecID)) +
+	geom_point() +
+	geom_line(aes(group=vecID, color=vecName), size=1) +
+	facet_wrap(~ vecHEAL, ncol=6) + theme(legend.position="none") + 
+	xlim(c(-1, 730))
 
-maxHeal<-apply(MatMinRUST, 1, max, na.rm=T)
-maxHeal[maxHeal<0] <- NA
+datRUST2<-datRUST[datRUST$vecHEAL==names(sort(table(datRUST$vecHEAL), decreasing=T))[1], ]
+datRUST3<-datRUST[datRUST$vecHEAL %in% names(sort(table(datRUST$vecHEAL), decreasing=T))[1:8], ]
 
-HealingGroups<-rep("--", nrow(MatMinRUST))
-HealingGroups[daysFirst10<90]<-"a. <90"
-HealingGroups[daysFirst10>=90 & daysFirst10<180]<-"b. 90~180"
-HealingGroups[daysFirst10>=180& daysFirst10<365]<-"c. 180~365"
-HealingGroups[daysFirst10>=365& daysFirst10<730]<-"d. 365~730"
-HealingGroups[daysFirst10>730]<-"e. >730"
+pdf("healing_curve_revisions.pdf", width=12)
+	ggplot(datRUST3, aes(x=vecDaysPostOp, y=vecMin, group=vecHEAL)) +
+#		geom_point(aes(color=vecHEAL)) +
+		geom_smooth(data=datRUST3, aes(color=vecHEAL), size=2) +
+		 ylim(c(4,12))
 
-surgWithinOneYear<-rep("--", nrow(MatMinRUST))
-surgWithinOneYear[perboneIndexOsteo$DaysSurgToCutoff<365]<-"surgWithinOneYr"
-surgWithinOneYear[perboneIndexOsteo$DaysSurgToCutoff>=365]<-"surgOverOneYr"
+	ggplot(datRUST3, aes(x=vecDaysPostOp, y=vecMin, group=vecHEAL)) +
+#		geom_point(aes(color=vecHEAL)) +
+		geom_smooth(data=datRUST3, aes(color=vecHEAL), size=2) +
+		xlim(c(-1, 730)) + ylim(c(4,12))
 
-isRevised<-rep("--", nrow(MatMinRUST))
-isRevised[perboneIndexOsteo$nameBoneOrder %in% perboneRevisons$nameLinkTo]<-"alreadyRevised"
-isRevised[!perboneIndexOsteo$nameBoneOrder %in% perboneRevisons$nameLinkTo]<-"notYetRevised"
+	ggplot(datRUST3, aes(x=vecDaysPostOp, y=vecMin, group=vecHEAL)) +
+#		geom_point(aes(color=vecHEAL)) +
+		geom_smooth(data=datRUST3, aes(color=vecHEAL), size=2) +
+		xlim(c(-1, 365)) + ylim(c(4,12))
 
-table(HealingGroups, paste0(surgWithinOneYear, "__", isRevised))
+	ggplot(datRUST3, aes(x=vecDaysPostOp, y=vecMin, group=vecHEAL)) +
+#		geom_point(aes(color=vecHEAL)) +
+		geom_smooth(data=datRUST3, aes(color=vecHEAL), size=2) +
+		xlim(c(-1, 182)) + ylim(c(4,12))
+dev.off()
 
-table(daysLast9>=365, HealingGroups)
-table(daysLast9>180 & daysLast9<365, HealingGroups)
-table(daysLast9<180, HealingGroups)
+	facet_wrap(~ vecHEAL, ncol=6) + theme(legend.position="none") + 
 
-notHealingGroups<-rep("--", nrow(MatMinRUST))
-notHealingGroups[daysLast9<90]<-"a. <90"
-notHealingGroups[daysLast9>=90 & daysLast9<180]<-"b. 90~180"
-notHealingGroups[daysLast9>=180& daysLast9<365]<-"c. 180~365"
-notHealingGroups[daysLast9>=365& daysLast9<730]<-"d. 365~730"
-notHealingGroups[daysLast9>730]<-"e. >730"
+ggplot(datRUST2, aes(x=vecDaysPostOp, y=vecMin, group=vecHEAL)) +
+	geom_point(aes(color=vecHEAL)) +
+	geom_line(aes(group=vecID, color=vecName), size=1) +
+	geom_smooth(data=datRUST2) +
+	theme(legend.position="none") + 
+	xlim(c(-1, 730)) + ylim(c(0,12))
 
-table(notHealingGroups, HealingGroups)
+
 ####################################################
 perboneIndexOsteo[["isRevised"]]<-perboneIndexOsteo$nameBoneOrder %in% perboneRevisons$nameLinkTo
 outcomes<-rep("--", nrow(MatMinRUST))
